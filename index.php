@@ -344,7 +344,7 @@ onerror="this.src='images/noimage.png'">
 
 <!-- ================= BIG BANNER 1 ================= -->
 <div class="container-fluid mt-4 big-banner">
-<img src="images/banner3.png">
+<img src="images/banner.jpeg">
 </div>
 
 
