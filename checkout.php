@@ -10,7 +10,17 @@ require __DIR__ . '/PHPMailer/src/Exception.php';
 require __DIR__ . '/PHPMailer/src/PHPMailer.php';
 require __DIR__ . '/PHPMailer/src/SMTP.php';
 
-if(empty($_SESSION['cart'])) {
+/* 🔐 LOGIN CHECK */
+if(!isset($_SESSION['user_id']) || !isset($_SESSION['user_name'])){
+    echo "<script>
+            alert('Please login first');
+            window.location='customer/login.php';
+          </script>";
+    exit();
+}
+
+/* 🛒 CART CHECK */
+if(empty($_SESSION['cart'])){
     echo "<h3 class='text-center mt-5 text-danger'>Cart is Empty</h3>";
     include("includes/footer.php");
     exit();
@@ -21,165 +31,103 @@ $user_name = $_SESSION['user_name'];
 
 $total = 0;
 
-/* CALCULATE TOTAL */
-foreach($_SESSION['cart'] as $id => $qty) {
-
+/* 💰 CALCULATE TOTAL */
+foreach($_SESSION['cart'] as $id => $qty){
     $result = mysqli_query($conn, "SELECT * FROM products WHERE id=$id");
     $product = mysqli_fetch_assoc($result);
-    
-    $total += $product['price'] * $qty;
+
+    if($product){
+        $total += $product['price'] * $qty;
+    }
 }
 
-
-/* GET ADDRESS */
+/* 📍 GET ADDRESS */
 $address = "";
-$addr_query = mysqli_query($conn,"SELECT * FROM addresses WHERE user_name='$user_name' LIMIT 1");
+$addr_query = mysqli_query($conn,"SELECT * FROM addresses WHERE user_id='$user_id' LIMIT 1");
 
 if(mysqli_num_rows($addr_query) > 0){
-
     $addr_data = mysqli_fetch_assoc($addr_query);
     $address = $addr_data['address'];
-
 }
 
-/* PLACE ORDER */
+/* 🚀 PLACE ORDER */
 if(isset($_POST['place_order'])){
 
-$email = mysqli_real_escape_string($conn, $_POST['email']);
-$payment_method = mysqli_real_escape_string($conn, $_POST['payment_method']);
-$address = mysqli_real_escape_string($conn, $_POST['address']);
+    $email = mysqli_real_escape_string($conn, $_POST['email']);
+    $payment_method = mysqli_real_escape_string($conn, $_POST['payment_method']);
+    $address = mysqli_real_escape_string($conn, $_POST['address']);
 
+    $order_insert = mysqli_query($conn,
+    "INSERT INTO orders (user_id,user_name,email,address,payment_method,total_amount,status)
+    VALUES ('$user_id','$user_name','$email','$address','$payment_method','$total','Pending')"
+    );
 
+    if($order_insert){
 
+        $order_id = mysqli_insert_id($conn);
 
-$order_insert = mysqli_query($conn,
+        /* 📦 ORDER ITEMS */
+        foreach($_SESSION['cart'] as $id => $qty){
+            $product = mysqli_query($conn,"SELECT * FROM products WHERE id=$id");
+            $row = mysqli_fetch_assoc($product);
 
-"INSERT INTO orders (user_id,user_name,email,address,payment_method,total_amount,status)
+            if($row){
+                $price = $row['price'];
 
-VALUES ('$user_id','$user_name','$email','$address','$payment_method','$total','Pending')"
+                mysqli_query($conn,
+                "INSERT INTO order_items (order_id,product_id,quantity,price)
+                VALUES ('$order_id','$id','$qty','$price')"
+                );
+            }
+        }
 
-);
+        /* 📧 EMAIL */
+        $mail = new PHPMailer(true);
 
+        try{
+            $mail->isSMTP();
+            $mail->Host='smtp.gmail.com';
+            $mail->SMTPAuth=true;
+            $mail->Username='YOUR_REAL_GMAIL@gmail.com';
+            $mail->Password='YOUR_APP_PASSWORD';
 
-if($order_insert){
+            $mail->SMTPSecure='ssl';
+            $mail->Port=465;
 
-$order_id = mysqli_insert_id($conn);
+            $mail->setFrom('YOUR_REAL_GMAIL@gmail.com','GrihaMart');
+            $mail->addAddress($email,$user_name);
 
-/* ORDER ITEMS */
-foreach($_SESSION['cart'] as $id => $qty){
+            $mail->isHTML(true);
+            $mail->Subject='Order Confirmation - GrihaMart';
 
-$product = mysqli_query($conn,"SELECT * FROM products WHERE id=$id");
+            $mail->Body="
+            <h2>Thank you for your order $user_name</h2>
+            <p><b>Order ID:</b> $order_id</p>
+            <p><b>Total Amount:</b> ₹$total</p>
+            <p><b>Payment Method:</b> $payment_method</p>
+            <p><b>Delivery Address:</b> $address</p>
+            ";
 
-$row = mysqli_fetch_assoc($product);
+            $mail->send();
 
-$price = $row['price'];
+        }catch(Exception $e){}
 
-mysqli_query($conn,
+        /* 🧹 CLEAR CART */
+        unset($_SESSION['cart']);
 
-"INSERT INTO order_items (order_id,product_id,quantity,price)
+        echo "<script>
+                alert('Order Placed Successfully');
+                window.location='my_orders.php';
+              </script>";
 
-VALUES ('$order_id','$id','$qty','$price')"
-
-);
-
-}
-
-
-/* EMAIL */
-
-$mail = new PHPMailer(true);
-
-try{
-
-$mail->isSMTP();
-$mail->Host='smtp.gmail.com';
-$mail->SMTPAuth=true;
-$mail->Username='YOUR_REAL_GMAIL@gmail.com';
-$mail->Password='rzjbewsfftkjivyp';
-
-$mail->SMTPSecure='ssl';
-$mail->Port=465;
-
-$mail->setFrom('YOUR_REAL_GMAIL@gmail.com','GrihaMart');
-$mail->addAddress($email,$user_name);
-
-$mail->isHTML(true);
-$mail->Subject='Order Confirmation - GrihaMart';
-
-$mail->Body="
-
-<h2>Thank you for your order $user_name</h2>
-
-<p><b>Order ID:</b> $order_id</p>
-
-<p><b>Total Amount:</b> ₹$total</p>
-
-<p><b>Payment Method:</b> $payment_method</p>
-
-<p><b>Delivery Address:</b> $address</p>
-
-";
-
-$mail->send();
-
-}catch(Exception $e){}
-
-
-/* CLEAR CART */
-
-unset($_SESSION['cart']);
-
-
-echo "<script>
-
-alert('Order Placed Successfully');
-
-window.location='my_orders.php';
-
-</script>";
-
-}else{
-
-echo "Order Error: ".mysqli_error($conn);
-}
-
+    } else {
+        echo "Order Error: ".mysqli_error($conn);
+    }
 }
 ?>
 
-<style>
-
-/* Card Style */
-.checkout-box{
-background:white;
-padding:20px;
-border-radius:12px;
-box-shadow:0 5px 15px rgba(0,0,0,0.1);
-}
-
-/* Mobile */
-@media(max-width:768px){
-
-.checkout-box{
-padding:15px;
-}
-
-h2{
-font-size:20px;
-}
-
-h4{
-font-size:18px;
-}
-
-}
-
-</style>
-
-
 <div class="container mt-4">
-
 <div class="row justify-content-center">
-
 <div class="col-md-6">
 
 <div class="checkout-box">
@@ -195,7 +143,7 @@ Total: ₹<?php echo $total; ?>
 <input type="text"
 name="name"
 class="form-control mb-3"
-value="<?php echo $user_name; ?>"
+value="<?php echo htmlspecialchars($user_name); ?>"
 readonly>
 
 <input type="email"
@@ -208,13 +156,11 @@ required>
 
 <textarea name="address"
 class="form-control mb-3"
-required><?php echo $address; ?></textarea>
-
+required><?php echo htmlspecialchars($address); ?></textarea>
 
 <label class="fw-bold">Payment Method</label>
 
 <div class="form-check">
-
 <input class="form-check-input"
 type="radio"
 name="payment_method"
@@ -222,20 +168,14 @@ value="Cash on Delivery"
 required>
 
 <label class="form-check-label">
-
 Cash on Delivery
-
 </label>
-
 </div>
-
 
 <button type="submit"
 name="place_order"
 class="btn btn-success w-100 mt-3">
-
 Confirm Order
-
 </button>
 
 </form>
@@ -243,9 +183,7 @@ Confirm Order
 </div>
 
 </div>
-
 </div>
-
 </div>
 
 <?php include("includes/footer.php"); ?>
